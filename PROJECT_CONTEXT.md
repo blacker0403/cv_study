@@ -10,7 +10,9 @@
 - 核心文件：config.py、data.py、model.py、train.py、predict.py、plots.py；避免增加通用训练框架。
 - 单卷积、最大池化、展平、Dropout、带 L2 的 10 类输出，共 13,610 参数。
 - 训练/验证/测试分别为 50,000 / 10,000 / 10,000，测试集不参与训练或训练期间验证。
-- Python 统一使用 3.11.x；.python-version 记录选择，训练/预测入口在加载第三方依赖前检查版本。
+- Python 统一使用 3.11.x；使用 Miniconda 的 cv_study 命名环境，环境内以 python -m pip 安装 requirements.txt。
+- .python-version 保留版本提示，Conda 通过创建命令指定 Python 3.11；训练/预测入口继续检查版本。
+- README 使用标准项目文档结构，语气简明客观；详细教学原理留在 docs/tutorial.md。
 - 当前默认设置：50 轮、batch 64、Adam 学习率 0.001、随机种子 42。
 - best 按最低 val_loss 选取，last 为最后完整轮次；早停 restore_best_weights=False。
 - 每次实验建立独立 outputs 子目录，保存配置、版本、日志、模型和图像；outputs/ 与数据缓存不提交 Git。
@@ -19,10 +21,18 @@
 
 - Python 3.11 限定、best/last、综合教学代码和中文教程已完成。
 - 依赖清单保留未固定版本方式，新增 matplotlib。实际验证：Python 3.11.15、TensorFlow 2.21.0、Keras 3.15.1、NumPy 2.4.6、Matplotlib 3.11.2。
-- README 提供启动与预测命令；docs/tutorial.md 按 16 个部分解释数据、网络、训练、正则化、调参、回调、图像和恢复边界。
+- README 按环境、安装、使用、结构、配置、输出、实验记录、测试和常见问题组织；docs/tutorial.md 保留 16 个训练主题并补充 Conda 环境前置步骤。
 - config.py 集中超参数，train.py 保存 best/last、CSV、配置和环境版本、最终测试报告；plots.py 输出曲线、混淆矩阵与错分图片。
 
 ## Recent Sessions
+
+### 2026-10-29：Miniconda 与 README 文风
+
+- 用户指定 Miniconda 管理环境，并要求 README 使用常见项目文档写法，保持专业且可供新手操作。
+- 已先 git pull --ff-only，结果 Already up to date。创建命令统一为 conda create -n cv_study python=3.11 pip -y，激活后使用 python。
+- README 补充解释器检查、重新打开终端后的激活步骤、常见环境问题；综合教程同步 Conda 前置步骤。
+- 本次仅更新文档，命令对照官方 Conda/Miniconda 文档核验，没有创建或删除用户环境，也没有重新训练。原 Linux/WSL 实验记录保留其来源。
+- 工作区原有 tests/test_training.py 删除状态不属于本次文档变更，提交时保留。
 
 ### 2026-10-29：综合教程与 best/last
 

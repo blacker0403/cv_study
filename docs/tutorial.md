@@ -2,6 +2,18 @@
 
 本教程先理解一条完整的数据路径，再学习调参。主 README 负责安装和命令；这里解释代码为什么这样写。默认网络很小，重点是理解训练过程，而不是追求 MNIST 排行榜成绩。
 
+## 运行环境
+
+首次安装见 [README](../README.md#安装)。本文使用 Miniconda 的 `cv_study` 环境，Python 版本为 3.11.x。每次打开终端后，先进入项目目录，再执行：
+
+```bash
+conda activate cv_study
+python --version
+python -c "import sys; print(sys.executable)"
+```
+
+`python` 应指向 `cv_study` 环境中的解释器。Miniconda 的 base 环境可以使用其他 Python 版本，不影响这个项目环境。项目依赖通过激活后的 `python -m pip install -r requirements.txt` 安装。
+
 ## 1. 我们在解决什么问题
 
 MNIST 中每张图片是一个手写数字：28 像素高、28 像素宽、一个灰度通道。输入是图片，输出是 0～9 中的一个类别，这叫十分类。
@@ -247,7 +259,7 @@ python predict.py --checkpoint last
 
 ## 16. 核心检查清单
 
-- Python 是否为 3.11.x，实际安装依赖版本是否记录？
+- 是否已激活 `cv_study` Conda 环境，Python 是否为 3.11.x，实际安装依赖版本是否记录？
 - 图片和标签是否对应，形状、通道、数值范围是否正确？
 - 训练/验证/测试是否独立，预测预处理是否一致？
 - 输出是否为十类概率，损失函数是否匹配整数标签与 softmax？
