@@ -8,7 +8,7 @@ from data import load_data
 from model import build_model
 
 # 初学时只需要改这里：epoch 是完整学习训练集的轮数，batch 是每批图片数。
-EPOCHS = 3
+EPOCHS = 50
 BATCH_SIZE = 64
 LEARNING_RATE = 0.001
 
