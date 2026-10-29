@@ -1,0 +1,7 @@
+# 本地环境、数据缓存与运行结果不提交到 Git。
+.venv/
+__pycache__/
+*.pyc
+.keras/
+outputs/
+.planning/
