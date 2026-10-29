@@ -12,6 +12,7 @@ from tensorflow import keras
 from data import load_data
 from model import build_model
 from plots import save_confusion_matrix, save_curves, save_predictions
+from training_logger import TrainingLogger
 
 
 class RecordLearningRate(keras.callbacks.Callback):
@@ -29,14 +30,14 @@ def build_callbacks(run_dir):
         callbacks.append(keras.callbacks.ReduceLROnPlateau(
             monitor="val_loss", mode="min", factor=config.LR_FACTOR,
             patience=config.LR_PATIENCE, min_lr=config.MIN_LEARNING_RATE,
-            min_delta=0.0, verbose=1,
+            min_delta=0.0, verbose=0,
         ))
 
     callbacks.extend([
         # 只比较验证损失，越低越好。绝不能按测试准确率挑选 best。
         keras.callbacks.ModelCheckpoint(
             run_dir / "best.keras", monitor="val_loss", mode="min",
-            save_best_only=True, verbose=1,
+            save_best_only=True, verbose=0,
         ),
         # 每个完整轮次结束都覆盖 last，保留这一轮的模型和优化器状态。
         keras.callbacks.ModelCheckpoint(run_dir / "last.keras", save_best_only=False),
@@ -47,7 +48,7 @@ def build_callbacks(run_dir):
         callbacks.append(keras.callbacks.EarlyStopping(
             monitor="val_loss", mode="min", patience=config.EARLY_STOPPING_PATIENCE,
             # 不把内存模型恢复成 best，否则容易误把 best 当作 last 保存。
-            restore_best_weights=False, min_delta=0.0, verbose=1,
+            restore_best_weights=False, min_delta=0.0, verbose=0,
         ))
     return callbacks
 
@@ -56,8 +57,6 @@ def main():
     keras.utils.set_random_seed(config.SEED)
     # 固定种子便于比较，但不同硬件/软件版本仍可能产生数值差异。
     (x_train, y_train), val_data, (x_test, y_test) = load_data()
-    print(f"训练 {len(x_train)} 张，验证 {len(val_data[0])} 张，测试 {len(x_test)} 张")
-    print(f"训练图片：{x_train.shape}，类型：{x_train.dtype}，标签示例：{y_train[:10]}")
 
     # 每次训练使用新目录，旧实验的 best、last、曲线和参数不会被覆盖。
     run_dir = config.OUTPUT_DIR / datetime.now().strftime("%Y%m%d-%H%M%S-%f")
@@ -68,12 +67,16 @@ def main():
         "python": platform.python_version(),
         "tensorflow": version("tensorflow"), "keras": version("keras"),
         "numpy": version("numpy"), "matplotlib": version("matplotlib"),
+        "tqdm": version("tqdm"),
     }
     (run_dir / "config.json").write_text(json.dumps(settings, indent=2, default=str), encoding="utf-8")
-    print(f"本次实验目录：{run_dir}")
 
     model = build_model()
-    model.summary()
+    print(f"MNIST CNN  Python-{platform.python_version()}  TensorFlow-{version('tensorflow')}  Keras-{version('keras')}")
+    print(f"Model: {model.name}, {model.count_params():,} parameters, input={x_train.shape[1:]}")
+    print(f"Data: train={len(x_train)}, val={len(val_data[0])}, test={len(x_test)}, batch={config.BATCH_SIZE}")
+    print(f"Optimizer: Adam, lr={config.LEARNING_RATE:g}, epochs={config.EPOCHS}, seed={config.SEED}")
+    print(f"Save directory: {run_dir}")
     # compile 只设置学习规则；fit 才执行前向传播、计算损失、求梯度、更新参数。
     # softmax 输出概率，因此交叉熵使用默认 from_logits=False；标签是整数。
     # clipnorm 限制梯度范数，不能代替正确的数据检查和合适的学习率。
@@ -82,12 +85,17 @@ def main():
         loss="sparse_categorical_crossentropy",
         metrics=["accuracy"],
     )
-    history = model.fit(
-        x_train, y_train,
-        batch_size=config.BATCH_SIZE, epochs=config.EPOCHS,
-        validation_data=val_data, shuffle=True,
-        callbacks=build_callbacks(run_dir), verbose=2,
-    )
+    progress = TrainingLogger(len(val_data[0]), config.BATCH_SIZE)
+    # 关闭 Keras 的重复输出；显示回调放在最后，只读取其他回调处理后的状态。
+    try:
+        history = model.fit(
+            x_train, y_train,
+            batch_size=config.BATCH_SIZE, epochs=config.EPOCHS,
+            validation_data=val_data, shuffle=True,
+            callbacks=[*build_callbacks(run_dir), progress], verbose=0,
+        )
+    finally:
+        progress.close()
 
     # NaN/Inf 表示训练异常；避免把损坏的模型当作正常完成的实验。
     for metric, values in history.history.items():
@@ -95,10 +103,13 @@ def main():
             raise RuntimeError(f"{metric} 出现 NaN/Inf，请检查数据和学习率。日志位于：{run_dir}")
     best_epoch = int(np.argmin(history.history["val_loss"])) + 1
     last_epoch = len(history.history["loss"])
+    if last_epoch < config.EPOCHS:
+        print(f"Early stopping: val_loss did not improve for {config.EARLY_STOPPING_PATIENCE} epochs.")
     save_curves(history.history, run_dir)
 
     # 训练结束后加载 best 做最终测试。last 保留最后完成轮次，不因评估而覆盖。
     best_model = keras.models.load_model(run_dir / "best.keras")
+    print("Evaluating best.keras on the test set...")
     test_metrics = best_model.evaluate(x_test, y_test, verbose=0, return_dict=True)
     # evaluate 用标签评分；predict 只接收图片，输出每一类的概率。
     probabilities = best_model.predict(x_test, batch_size=config.BATCH_SIZE, verbose=0)
@@ -120,9 +131,11 @@ def main():
         "train_size": len(x_train), "validation_size": len(val_data[0]), "test_size": len(x_test),
     }
     (run_dir / "metrics.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
-    print(f"best 来自第 {best_epoch} 轮，last 来自第 {last_epoch} 轮")
-    print(f"best 测试损失：{test_metrics['loss']:.4f}，准确率：{test_metrics['accuracy']:.2%}")
-    print(f"模型、配置、日志与图片已保存：{run_dir}")
+    print("\n" + "".join(f"{name:>12}" for name in ("Model", "Epoch", "Val_loss", "Test_loss", "Test_acc")))
+    print(f"{'best.keras':>12}{best_epoch:>12}{report['best_val_loss']:>12.4f}"
+          f"{test_metrics['loss']:>12.4f}{test_metrics['accuracy']:>12.4f}")
+    print(f"{'last.keras':>12}{last_epoch:>12}{history.history['val_loss'][-1]:>12.4f}{'-':>12}{'-':>12}")
+    print(f"Results saved to {run_dir}")
 
 
 if __name__ == "__main__":

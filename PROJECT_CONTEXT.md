@@ -7,7 +7,7 @@
 ## Stable Decisions
 
 - 使用 TensorFlow/Keras 的基础层与自动求导，不依赖 PyTorch。
-- 核心文件：config.py、data.py、model.py、train.py、predict.py、plots.py；避免增加通用训练框架。
+- 核心文件：config.py、data.py、model.py、train.py、predict.py、plots.py；训练显示独立在 training_logger.py，避免增加通用训练框架。
 - 单卷积、最大池化、展平、Dropout、带 L2 的 10 类输出，共 13,610 参数。
 - 训练/验证/测试分别为 50,000 / 10,000 / 10,000，测试集不参与训练或训练期间验证。
 - Python 统一使用 3.11.x；使用 Miniconda 的 cv_study 命名环境，环境内以 python -m pip 安装 requirements.txt。
@@ -25,6 +25,16 @@
 - config.py 集中超参数，train.py 保存 best/last、CSV、配置和环境版本、最终测试报告；plots.py 输出曲线、混淆矩阵与错分图片。
 
 ## Recent Sessions
+
+### 2026-10-29：训练终端输出
+
+- 用户要求参考 YOLO 官方风格整理训练输出，只展示当前分类代码的真实指标；已先 git pull --ff-only，结果 Already up to date。
+- training_logger.py 使用 Keras 回调和 tqdm 显示对齐的训练/验证进度；终端显示 Epoch/Loss/Acc/LR 和验证 Images/Loss/Acc，重定向到文件时每轮一行，包含验证指标和耗时。
+- 关闭 fit、模型保存、调度和早停的重复 verbose 输出；启动只打印必要配置，结束汇总 best/last，保留早停与学习率变化提示。详细网络结构可独立运行 summary() 查看。
+- 日志只读取累计指标，表格使用本轮学习率；训练规则、best/last 和 CSV 含义保持不变。新增未锁版本依赖 tqdm，记录实际安装版本；没有引入 Ultralytics 或 PyTorch。
+- 六项 unittest、依赖检查通过。真实 MNIST 子集（训练 257、验证 65、测试 131，2 轮）在普通终端与重定向输出中跑通，完成保存和绘图；有/无日志回调的逐轮指标及最终权重一致。该检查验证显示和流程，不作为模型精度实验；历史 50 轮结果保持原记录。
+- 80 列终端采用自适应进度条，避免固定长度进度条截断末尾的时间/速度。尚未验证 Windows 原生终端；TensorFlow 的诊断和警告不屏蔽。
+
 
 ### 2026-10-29：Miniconda 与 README 文风
 

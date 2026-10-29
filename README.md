@@ -67,6 +67,19 @@ python train.py
 
 每次训练生成独立的 `outputs/<实验时间戳>/` 目录。训练完成后，程序加载 `best.keras` 在测试集上评估，并保存曲线、混淆矩阵和错分样本。
 
+终端输出采用类似 YOLO 的对齐表格和进度条。每轮先显示训练，再显示验证：
+
+```text
+    Epoch     Loss      Acc       LR
+     1/50   0.3456   0.9012    0.001: 100%|##| 782/782 [00:06<00:00, 130.33it/s]
+    Split   Images     Loss      Acc
+      val    10000   0.2345   0.9321: 100%|##| 157/157 [00:01<00:00, 157.00it/s]
+```
+
+以上数值仅用于说明格式。`Loss` 为含正则项的总损失，`Acc` 为准确率（0～1），`LR` 为本轮使用的学习率；进度以批次数计，`it/s` 表示每秒处理批数。结束后汇总 best/last 所在轮次和 best 的测试结果。
+
+将输出重定向到文件时，例如 `python train.py > train.log`，程序自动改为每轮一行，包含训练/验证指标、学习率和耗时。完整数值仍保存在 `history.csv`；TensorFlow 的启动诊断、警告和错误仍正常显示。
+
 ### 预测
 
 ```bash
@@ -97,11 +110,12 @@ cv_study/
 ├── data.py                # 数据加载、预处理与划分
 ├── model.py               # CNN 结构
 ├── train.py               # 训练、保存、调度、早停与测试
+├── training_logger.py     # 训练/验证进度与终端表格
 ├── predict.py             # 模型加载与预测
 ├── plots.py               # 训练曲线与结果绘图
 ├── requirements.txt       # 项目依赖
 ├── docs/tutorial.md       # 训练原理与调参说明
-├── tests/test_training.py # 关键行为测试
+├── tests/                 # 训练行为与日志输出测试
 └── outputs/               # 本地训练结果，不提交 Git
 ```
 
@@ -182,7 +196,7 @@ outputs/<实验时间戳>/
 python -m unittest discover -s tests -v
 ```
 
-测试覆盖数据预处理与划分、Python 版本检查，以及 best/last、学习率调整和早停的关键行为。保存逻辑使用人为指定的验证损失进行测试，不代表模型精度。
+测试覆盖数据预处理与划分、Python 版本检查、best/last、学习率调整和早停，以及终端/文件两种日志输出。保存逻辑使用人为指定的验证损失进行测试，不代表模型精度。
 
 ## 常见问题
 
@@ -207,5 +221,6 @@ Windows 从开始菜单打开 Miniconda 对应的 Anaconda Prompt，再运行 `c
 - [训练教程](docs/tutorial.md)：网络结构、训练流程、调参与结果分析
 - [Miniconda 安装](https://www.anaconda.com/docs/getting-started/miniconda/install)
 - [Conda 环境管理](https://docs.conda.io/projects/conda/en/stable/user-guide/tasks/manage-environments.html)
+- [Ultralytics 分类训练输出](https://github.com/ultralytics/ultralytics/blob/main/ultralytics/models/yolo/classify/train.py)：终端布局参考，项目不依赖 Ultralytics
 - [Keras MNIST CNN 示例](https://keras.io/examples/vision/mnist_convnet/)
 - [ModelCheckpoint](https://keras.io/api/callbacks/model_checkpoint/)、[EarlyStopping](https://keras.io/api/callbacks/early_stopping/)、[ReduceLROnPlateau](https://keras.io/api/callbacks/reduce_lr_on_plateau/)
