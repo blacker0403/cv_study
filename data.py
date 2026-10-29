@@ -1,5 +1,6 @@
 """数据模块：下载 MNIST，把图片整理成 CNN 可以接收的格式。"""
 
+import config
 from tensorflow import keras
 
 
@@ -21,9 +22,13 @@ def load_data():
     images = preprocess_images(images)
     test_images = preprocess_images(test_images)
 
-    # 从官方训练集拿出最后 10,000 张做验证，剩下 50,000 张用于更新参数。
+    # 默认从官方训练集拿出最后 10,000 张做验证，剩下 50,000 张用于更新参数。
     # 验证集只用来观察训练效果；测试集留到训练结束后做最后评估。
-    train_data = (images[:50000], labels[:50000])
-    val_data = (images[50000:], labels[50000:])
+    # 防止把验证集设为 0 或占满训练集，导致切片意外或根本没有训练数据。
+    if not 0 < config.VALIDATION_SIZE < len(images):
+        raise ValueError("VALIDATION_SIZE 必须大于 0 且小于官方训练集数量。")
+    split = len(images) - config.VALIDATION_SIZE
+    train_data = (images[:split], labels[:split])
+    val_data = (images[split:], labels[split:])
     test_data = (test_images, test_labels)
     return train_data, val_data, test_data

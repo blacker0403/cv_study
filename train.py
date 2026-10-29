@@ -1,62 +1,129 @@
-"""训练入口：准备数据 → 创建模型 → 学习参数 → 测试 → 保存。"""
+"""训练入口：配置 → 数据 → 模型 → 训练控制 → 选择 best → 最终测试。"""
 
-from pathlib import Path
+import json
+import platform
+from datetime import datetime
+from importlib.metadata import version
 
+import config  # 先检查 Python 3.11，再导入第三方依赖。
+import numpy as np
 from tensorflow import keras
 
 from data import load_data
 from model import build_model
+from plots import save_confusion_matrix, save_curves, save_predictions
 
-# 初学时只需要改这里：epoch 是完整学习训练集的轮数，batch 是每批图片数。
-EPOCHS = 50
-BATCH_SIZE = 64
-LEARNING_RATE = 0.001
 
-# 以脚本所在目录为起点，避免从不同工作目录运行时把结果存到别处。
-MODEL_PATH = Path(__file__).resolve().parent / "outputs" / "mnist_cnn.keras"
+class RecordLearningRate(keras.callbacks.Callback):
+    """Callback 是训练过程的钩子；这里在每轮结束时记录本轮使用的学习率。"""
+
+    def on_epoch_end(self, epoch, logs=None):
+        # 放在学习率调度器之前执行，记录的是本轮值，而不是下一轮的新值。
+        logs["learning_rate"] = float(keras.backend.get_value(self.model.optimizer.learning_rate))
+
+
+def build_callbacks(run_dir):
+    """训练规则集中放在这里，模型模块不需要知道如何保存、降学习率或早停。"""
+    callbacks = [keras.callbacks.TerminateOnNaN(), RecordLearningRate()]
+    if config.USE_LR_SCHEDULER:
+        callbacks.append(keras.callbacks.ReduceLROnPlateau(
+            monitor="val_loss", mode="min", factor=config.LR_FACTOR,
+            patience=config.LR_PATIENCE, min_lr=config.MIN_LEARNING_RATE,
+            min_delta=0.0, verbose=1,
+        ))
+
+    callbacks.extend([
+        # 只比较验证损失，越低越好。绝不能按测试准确率挑选 best。
+        keras.callbacks.ModelCheckpoint(
+            run_dir / "best.keras", monitor="val_loss", mode="min",
+            save_best_only=True, verbose=1,
+        ),
+        # 每个完整轮次结束都覆盖 last，保留这一轮的模型和优化器状态。
+        keras.callbacks.ModelCheckpoint(run_dir / "last.keras", save_best_only=False),
+        # 每轮一行记录，即使后续中断，已完成轮次的指标也可以查看。
+        keras.callbacks.CSVLogger(run_dir / "history.csv"),
+    ])
+    if config.USE_EARLY_STOPPING:
+        callbacks.append(keras.callbacks.EarlyStopping(
+            monitor="val_loss", mode="min", patience=config.EARLY_STOPPING_PATIENCE,
+            # 不把内存模型恢复成 best，否则容易误把 best 当作 last 保存。
+            restore_best_weights=False, min_delta=0.0, verbose=1,
+        ))
+    return callbacks
 
 
 def main():
-    # 固定随机种子，让同一环境下的实验便于比较；跨平台仍可能有小差异。
-    keras.utils.set_random_seed(42)
+    keras.utils.set_random_seed(config.SEED)
+    # 固定种子便于比较，但不同硬件/软件版本仍可能产生数值差异。
     (x_train, y_train), val_data, (x_test, y_test) = load_data()
     print(f"训练 {len(x_train)} 张，验证 {len(val_data[0])} 张，测试 {len(x_test)} 张")
+    print(f"训练图片：{x_train.shape}，类型：{x_train.dtype}，标签示例：{y_train[:10]}")
+
+    # 每次训练使用新目录，旧实验的 best、last、曲线和参数不会被覆盖。
+    run_dir = config.OUTPUT_DIR / datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    run_dir.mkdir(parents=True)
+    settings = {name: value for name, value in vars(config).items() if name.isupper()}
+    # 包版本也影响结果；依赖清单未固定版本，因此记录实际安装环境。
+    settings["VERSIONS"] = {
+        "python": platform.python_version(),
+        "tensorflow": version("tensorflow"), "keras": version("keras"),
+        "numpy": version("numpy"), "matplotlib": version("matplotlib"),
+    }
+    (run_dir / "config.json").write_text(json.dumps(settings, indent=2, default=str), encoding="utf-8")
+    print(f"本次实验目录：{run_dir}")
 
     model = build_model()
-    model.summary()  # 查看每一层的输出形状与参数数量。
-
-    # compile 只指定学习规则，此时还没有开始训练。
-    # Adam 根据梯度更新参数；学习率控制每次更新的步幅。
-    # sparse 表示标签直接使用整数 0～9，不需要改成长度为 10 的向量。
-    # 交叉熵衡量预测与正确标签的差距，越小越好；accuracy 是预测正确的比例。
+    model.summary()
+    # compile 只设置学习规则；fit 才执行前向传播、计算损失、求梯度、更新参数。
+    # softmax 输出概率，因此交叉熵使用默认 from_logits=False；标签是整数。
+    # clipnorm 限制梯度范数，不能代替正确的数据检查和合适的学习率。
     model.compile(
-        optimizer=keras.optimizers.Adam(learning_rate=LEARNING_RATE),
+        optimizer=keras.optimizers.Adam(learning_rate=config.LEARNING_RATE, clipnorm=config.CLIPNORM),
         loss="sparse_categorical_crossentropy",
         metrics=["accuracy"],
     )
-
-    # fit 对每批数据依次执行：预测 → 计算损失 → 反向传播求梯度 → 更新参数。
-    # Keras 负责自动求导，我们专注理解数据、模型与训练过程。
-    # 每轮结束会检查验证集，验证时不会更新参数。
-    model.fit(
-        x_train,
-        y_train,
-        batch_size=BATCH_SIZE,
-        epochs=EPOCHS,
-        validation_data=val_data,
-        shuffle=True,
-        verbose=2,
+    history = model.fit(
+        x_train, y_train,
+        batch_size=config.BATCH_SIZE, epochs=config.EPOCHS,
+        validation_data=val_data, shuffle=True,
+        callbacks=build_callbacks(run_dir), verbose=2,
     )
 
-    # evaluate 只评估，不学习。测试集没有参与前面的参数更新和验证。
-    test_loss, test_accuracy = model.evaluate(x_test, y_test, verbose=0)
-    print(f"测试损失：{test_loss:.4f}，测试准确率：{test_accuracy:.2%}")
+    # NaN/Inf 表示训练异常；避免把损坏的模型当作正常完成的实验。
+    for metric, values in history.history.items():
+        if not np.isfinite(values).all():
+            raise RuntimeError(f"{metric} 出现 NaN/Inf，请检查数据和学习率。日志位于：{run_dir}")
+    best_epoch = int(np.argmin(history.history["val_loss"])) + 1
+    last_epoch = len(history.history["loss"])
+    save_curves(history.history, run_dir)
 
-    MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
-    model.save(MODEL_PATH)  # .keras 文件包含模型结构、学到的参数和优化器状态。
-    print(f"模型已保存：{MODEL_PATH}")
+    # 训练结束后加载 best 做最终测试。last 保留最后完成轮次，不因评估而覆盖。
+    best_model = keras.models.load_model(run_dir / "best.keras")
+    test_metrics = best_model.evaluate(x_test, y_test, verbose=0, return_dict=True)
+    # evaluate 用标签评分；predict 只接收图片，输出每一类的概率。
+    probabilities = best_model.predict(x_test, batch_size=config.BATCH_SIZE, verbose=0)
+    predictions = np.argmax(probabilities, axis=1)
+    save_confusion_matrix(y_test, predictions, run_dir)
+    wrong_indices = np.flatnonzero(predictions != y_test)
+    if len(wrong_indices):
+        selected = wrong_indices[:10]
+        save_predictions(
+            x_test[selected], y_test[selected], probabilities[selected],
+            run_dir / "mistakes.png", "First test mistakes (best model)",
+        )
+
+    # metrics.json 最后写入，也用作“本次实验已完整完成”的标记。
+    report = {
+        "best_epoch": best_epoch, "last_epoch": last_epoch,
+        "selection_metric": "val_loss", "best_val_loss": float(min(history.history["val_loss"])),
+        "best_model_test": test_metrics, "test_errors": int(len(wrong_indices)),
+        "train_size": len(x_train), "validation_size": len(val_data[0]), "test_size": len(x_test),
+    }
+    (run_dir / "metrics.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+    print(f"best 来自第 {best_epoch} 轮，last 来自第 {last_epoch} 轮")
+    print(f"best 测试损失：{test_metrics['loss']:.4f}，准确率：{test_metrics['accuracy']:.2%}")
+    print(f"模型、配置、日志与图片已保存：{run_dir}")
 
 
-# 直接运行 python train.py 才训练；被其他文件导入时不自动执行。
 if __name__ == "__main__":
     main()

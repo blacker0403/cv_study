@@ -1,162 +1,167 @@
-# 用一个很小的 CNN 学习识别手写数字
+# 从 MNIST 学会一套完整的 CNN 训练流程
 
-这个项目面向刚接触深度学习的人：会运行 Python，就可以跟着完成一次**准备数据 → 定义网络 → 训练 → 测试 → 保存 → 预测**。
+这是面向深度学习初学者的中文教程：使用 **Python 3.11.x + TensorFlow/Keras**，自己组合一个小 CNN，走通数据处理、训练、验证、保存、测试、预测和失败样本分析。没有 PyTorch 依赖。
 
-数据集 **MNIST**：每张图片是一个手写数字，大小为 28×28，目标是判断它属于 0～9 中的哪一个。
+建议先按本页跑通，再阅读 [综合教程：每一步为什么这样做、哪里可以调整](docs/tutorial.md)。代码关键位置都有中文注释。
 
-采用 **TensorFlow/Keras** 提供的基础网络层和自动求导。我们自己组合一个小 CNN，让每一层都看得见。项目没有 PyTorch 依赖，也没有使用预训练模型。普通 CPU 即可运行。
+## 1. 安装环境
 
-## 1. 先把程序跑起来
-
-建议使用 **Python 3.11 或 3.12**，下面所有命令都在项目目录执行。
+使用 **64 位 Python 3.11.x**，允许 3.11 系列补丁更新。`.python-version` 记录版本选择，代码启动时也会检查版本；这个文件不会自动替换电脑或旧虚拟环境里的 Python。
 
 ```bash
 git clone https://github.com/blacker0403/cv_study.git
 cd cv_study
-python -3.11 -m venv .venv
 ```
 
-激活虚拟环境，按自己的系统选择一条：
+选择一组命令创建并激活环境。如果已有 `.venv` 使用其他 Python 版本，请先退出该环境并将旧目录改名保存，再创建新环境。
+
+**Windows PowerShell：**
 
 ```powershell
-# Windows PowerShell
-.venv\bin\Activate.ps1
+py -3.11 --version
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
 ```
+
+**Windows CMD：**
 
 ```bat
-:: Windows 命令提示符 CMD
-.venv\bin\activate.bat
+py -3.11 --version
+py -3.11 -m venv .venv
+.venv\Scripts\activate.bat
 ```
 
-
-安装依赖，然后训练和预测：
+**Linux / macOS：**
 
 ```bash
+python3.11 --version
+python3.11 -m venv .venv
+source .venv/bin/activate
+```
+
+Windows 的 `-3.11` 属于 `py` 启动器，不能写成 `python -3.11`。找不到 `py` 或 `python3.11` 时，先安装 Python 3.11 并确认命令可用。
+
+激活后安装依赖，`python --version` 应显示 `Python 3.11.x`：
+
+```bash
+python --version
 python -m pip install -r requirements.txt
+```
+
+如果 PowerShell 阻止激活脚本，可以换用 CMD，或用 `.\.venv\Scripts\python.exe` 替代命令里的 `python`，直接运行虚拟环境解释器。
+
+普通 CPU 即可运行，不需要配置 GPU。第一次运行会下载 MNIST，缓存于用户目录的 `.keras/datasets/mnist.npz`。依赖清单当前没有固定包版本，本次验证使用的版本在实测记录中单独列出。
+
+## 2. 训练并选择模型预测
+
+```bash
 python train.py
 python predict.py
+python predict.py --checkpoint last
 ```
 
-如果系统只有 `python3` 命令，创建环境时使用 `python3 -m venv .venv`；激活后可以使用 `python`。
+默认最多训练 **50 轮**。学习率调整和早停根据验证损失工作，可能在第 50 轮之前结束。预测默认选择最近一次完整完成的实验中的 `best`；`--checkpoint last` 可以查看最后完成轮次的模型。
 
-第一次训练需要联网下载 MNIST，下载后会缓存在用户目录的 `.keras/datasets/mnist.npz`，Windows 通常是 `%USERPROFILE%\.keras\datasets\mnist.npz`。TensorFlow 安装包较大，首次安装需要一些时间。
+要指定以前的实验，把目录替换成训练时打印的真实目录：
 
-训练默认运行 3 轮，最后输出测试准确率，并把模型保存到 `outputs/mnist_cnn.keras`。预测程序读取这个文件，打印测试集前 10 张图片的真实数字、预测数字和预测概率。重新训练会覆盖这个模型文件。数据和模型文件不提交到 Git。
+```bash
+python predict.py --run-dir outputs/你的实验目录 --checkpoint best
+python predict.py --run-dir outputs/你的实验目录 --checkpoint last
+```
 
-> 如果运行预测时提示“还没有训练好的模型”，先执行 `python train.py`。如果数据下载失败，检查网络后重试。TensorFlow 启动时可能输出硬件相关日志，先看程序是否正常输出训练结果；这个项目不需要配置 GPU。
-
-## 2. 四个文件各做一件事
+每次训练建立独立目录，不覆盖旧实验：
 
 ```text
-cv_study/
-├── data.py          # 下载、归一化、补通道、划分数据
-├── model.py         # 只定义 CNN 的层和连接顺序
-├── train.py         # 指定学习规则，训练、测试并保存
-├── predict.py       # 加载保存的模型，输出预测
-├── requirements.txt # 固定依赖版本
-└── outputs/         # 运行后自动生成
+outputs/一次实验的时间戳/
+├── best.keras              # 验证损失最低时的完整模型
+├── last.keras              # 最后一个完整训练轮次的完整模型
+├── config.json             # 本次参数与实际 Python/依赖版本
+├── history.csv             # 逐轮损失、准确率、学习率
+├── metrics.json            # 最佳轮次、最后轮次、best 的最终测试结果
+├── curves.png / .svg       # 损失、准确率、学习率曲线
+├── confusion_matrix.*      # best 的测试集混淆矩阵
+├── mistakes.png            # 前 10 张错分图片；没有错误时不生成
+└── predictions_best.png    # 运行预测后生成；last 对应 predictions_last.png
 ```
 
-**建议阅读顺序：`data.py → model.py → train.py → predict.py`。** 核心代码都带有中文注释。
+两个 `.keras` 文件包含相同网络结构、各自轮次学到的参数及优化器状态。**best 按验证集选出，last 保留训练终点，不能用测试集挑 best。** 最佳轮次恰好是最后一轮时，两个文件的参数相同是正常的。
 
-`train.py` 调用数据模块和模型模块；`predict.py` 复用数据预处理并读取训练结果。数据模块不用知道网络如何搭建，模型模块不用知道文件如何下载。
+模型和日志保存在本机 `outputs/`，不提交 Git。旧版的 `outputs/mnist_cnn.keras` 会保留，但新版预测入口读取新实验目录中的 best/last。
 
-## 3. 数据究竟长什么样
+## 3. 模块如何分工
 
-一张图片可以理解成一张数字表格：28 行、28 列，每个位置记录一个像素的亮度。MNIST 通常是黑底亮色笔画，像素取值为 0～255。**标签**是这张图的正确答案，例如整数 `7`。
+| 文件 | 职责 |
+|---|---|
+| `config.py` | Python 版本检查、超参数和输出目录 |
+| `data.py` | 下载、归一化、补通道、训练/验证/测试划分 |
+| `model.py` | 卷积、池化、展平、Dropout、全连接输出 |
+| `train.py` | 编译、训练、保存回调、早停、调度与最终测试 |
+| `predict.py` | 选择 best/last、输出预测和图片 |
+| `plots.py` | 训练曲线、混淆矩阵和失败样本绘图 |
+| `tests/test_training.py` | 检查数据划分和 best/last 等关键语义 |
 
-预处理只做两件事：
+阅读顺序：**config → data → model → train → predict → plots**。不会的术语在 [综合教程](docs/tutorial.md) 中逐步解释。
 
-1. 转成 `float32`，再除以 255，把像素缩放到 0～1，便于训练。
-2. 增加一个通道维度，把 `(N, 28, 28)` 变成 `(N, 28, 28, 1)`。`N` 是图片数量，最后的 `1` 表示灰度通道。
+## 4. 先认识这几个可调参数
 
-本项目把数据分成三份，互不混用：
+完整参数都在 `config.py`。第一次建议只把 `EPOCHS` 改为 3，先走通流程；之后一次只改一个设置，用验证集比较。
 
-| 数据 | 数量 | 用途 | 会更新模型参数吗 |
-|---|---:|---|---|
-| 训练集 | 50,000 | 学习“什么笔画组合对应什么数字” | 会 |
-| 验证集 | 10,000 | 每轮结束检查学习效果，之后可用来比较设置 | 不会 |
-| 测试集 | 10,000 | 训练结束后，做最终评估 | 不会 |
-
-官方训练集有 60,000 张，我们从中取最后 10,000 张作为验证集。官方测试集独立保留。比较训练设置时看验证集，确定设置后再用测试集，避免反复看测试分数来调参数。
-
-## 4. 这个 CNN 有多简单
-
-CNN 是卷积神经网络。这里可以先把它理解成：**在图片上寻找局部笔画，再根据笔画特征判断数字。**
-
-| 步骤 | 一张图片的形状 | 这一层做什么 | 可训练参数 |
-|---|---|---|---:|
-| 输入 | `28×28×1` | 接收灰度图片 | 0 |
-| `Conv2D(8, 3)` + ReLU | `26×26×8` | 用 8 个小卷积核提取局部特征 | 80 |
-| `MaxPooling2D(2)` | `13×13×8` | 每个 2×2 区域取最大值，缩小特征图 | 0 |
-| `Flatten()` | `1352` | 把特征排成一行 | 0 |
-| `Dense(10)` + softmax | `10` | 给出数字 0～9 的预测概率 | 13,530 |
-
-总共只有 **13,610 个可训练参数**。`model.summary()` 显示的 `None` 是批次图片数量尚未固定；它不是图片尺寸缺失。
-
-几个容易混淆的地方：
-
-- **卷积核**是一小组可以学习的权重，不是人工写死的“横线检测器”。训练会逐渐调整它们。
-- **ReLU** 的规则是 `max(0, x)`，用于加入非线性。
-- **池化和展平**不学习参数。池化缩小空间尺寸，展平只改变排列形状。
-- **softmax** 把 10 个分数变成总和为 1 的概率。例如最大概率出现在下标 `7`，就预测为数字 7。这是模型的估计，不保证一定正确。
-
-参数数量也可以自己算：卷积层是 `(3×3×1 + 1)×8 = 80`；输出层是 `(1352 + 1)×10 = 13530`。两个公式里的 `+1` 都对应偏置。
-
-## 5. 网络是怎样“学习”的
-
-开始时，网络参数经过随机初始化，还不会识别数字。`train.py` 中的 `model.fit(...)` 会对每批图片重复下面的过程：
-
-1. **前向传播**：把图片送进网络，得到 10 个类别的预测概率。
-2. **计算损失**：把预测和正确标签比较。这里用交叉熵；正确类别得到的概率越低，损失越大。
-3. **反向传播**：计算损失相对于各个参数的梯度，也就是参数变化会怎样影响损失。
-4. **更新参数**：Adam 优化器根据梯度调整权重和偏置，尝试减小损失。
-
-Keras 负责自动求导和执行这些步骤，因此入门阶段不必手写反向传播。`compile(...)` 设置学习规则，`fit(...)` 才真正开始学习，`evaluate(...)` 和 `predict(...)` 都不会更新参数。
-
-当前设置都放在 `train.py` 顶部：
-
-| 设置 | 默认值 | 含义 |
+| 参数 | 默认值 | 调整的内容 |
 |---|---:|---|
-| `EPOCHS` | 3 | 完整学习训练集 3 轮 |
-| `BATCH_SIZE` | 64 | 每批最多看 64 张，再更新一次参数 |
-| `LEARNING_RATE` | 0.001 | 控制参数更新步幅 |
+| `EPOCHS` | 50 | 最多训练轮数 |
+| `BATCH_SIZE` | 64 | 每批图片数量 |
+| `LEARNING_RATE` | 0.001 | 初始更新步幅 |
+| `CONV_FILTERS` | 8 | 卷积核数量 |
+| `KERNEL_SIZE` | 3 | 卷积窗口尺寸 |
+| `DROPOUT_RATE` | 0.2 | 训练时随机丢弃的特征比例；0 为关闭 |
+| `L2_FACTOR` | 0.0001 | 权重正则化强度；0 为关闭 |
+| `CLIPNORM` | 1.0 | 梯度范数限制；None 为关闭 |
+| `LR_PATIENCE` | 3 | 连续几轮验证损失不降后降低学习率 |
+| `EARLY_STOPPING_PATIENCE` | 8 | 连续几轮验证损失不降后结束训练 |
 
-训练集有 50,000 张，一轮有 782 批，最后一批不足 64 张。学习率过大可能不稳定，过小可能学习很慢；增加轮数也不保证效果一直变好。
+设置 `USE_LR_SCHEDULER=False` 或 `USE_EARLY_STOPPING=False`，可以分别关闭调度或早停。初始设置用于教学，没有经过最优参数搜索。
 
-## 6. 怎样读训练输出
+## 5. 如何判断训练是否正常
 
-- `loss`：训练损失，衡量预测与答案的差距，通常希望降低。
-- `accuracy`：训练过程中统计的正确比例，例如 `0.95` 表示 95%。
-- `val_loss` / `val_accuracy`：每轮结束后在验证集上计算的指标。
-- 最后打印的“测试准确率”：在独立测试集上的最终结果。
+- `loss` / `val_loss` 是训练/验证总损失，包含交叉熵和 L2 项，通常希望降低。
+- `accuracy` / `val_accuracy` 是训练/验证正确率；`0.95` 表示 95%。
+- 训练分数持续提高、验证损失却变大时，可能过拟合；结合曲线和失败样本判断。
+- 验证准确率高于训练准确率并不一定异常：训练时启用 Dropout，而且训练指标是参数不断更新时的批次汇总。
+- 最后只对验证集选出的 best 做一次完整测试，避免根据测试分数反复调参。
 
-如果训练准确率提高，验证效果却持续变差，可能出现了**过拟合**：网络越来越适应见过的训练图片，却没有更好地识别新图片。不要只盯着训练分数。
+[综合教程](docs/tutorial.md) 包含标签的作用、损失与准确率的区别、欠拟合/过拟合/NaN 的排查、调参实验和保存后继续训练的边界。
 
-### 一次实际运行记录
+## 6. 验证记录
 
-2026-10-29，在 Python 3.12.3、TensorFlow 2.20.0、Keras 3.15.1、NumPy 2.2.6 的 Linux/WSL 环境中使用 CPU，按默认设置完整训练 3 轮：
+2026-10-29 使用 Python 3.11.15、TensorFlow 2.21.0、Keras 3.15.1、NumPy 2.4.6、Matplotlib 3.11.2，在 Linux/WSL 下用 CPU 完整训练默认的 50 轮：
 
-| 轮数 | 训练准确率 | 验证准确率 |
-|---|---:|---:|
-| 1 | 88.31% | 94.23% |
-| 2 | 94.59% | 95.67% |
-| 3 | 95.85% | 96.42% |
+| 轮数 | 训练准确率 | 验证准确率 | 验证总损失 |
+|---|---:|---:|---:|
+| 1 | 87.17% | 94.00% | 0.2163 |
+| 3 | 94.41% | 95.92% | 0.1528 |
+| 25 | 97.72% | 98.19% | 0.0819 |
+| 50 | 98.16% | 98.33% | 0.0753 |
 
-最终在 10,000 张独立测试图片上的准确率为 **96.29%**，测试损失为 **0.1273**。这是本项目的一次实测，不保证不同机器结果完全相同；没有搜索最优超参数。当前实测覆盖 Linux/WSL，Windows/macOS 安装步骤尚未在本项目中实际验证。
+本次 best 和 last 都来自第 50 轮：best 的独立测试准确率为 **98.22%**，总损失 **0.0704**，10,000 张测试图中有 **178** 张错误。两个模型文件均保留；最佳轮次恰好是最后一轮，所以参数相同。
 
-## 7. 跑通后只做两个小实验
+学习率在第 23、41 轮开始分别使用 0.0005、0.00025；本次未触发早停。保存/重载、best/last 独立预测、数据划分、版本错误提示和图像检查均通过。这是一次实测，没有进行最优参数搜索，也没有通过单因素实验证明新增机制一定提升效果。
 
-1. 只把 `EPOCHS` 从 3 改成 1，比较验证准确率和运行时间。
-2. 恢复轮数，再只把 `model.py` 中卷积核数量从 8 改成 16，观察 `summary()` 的参数数量和验证结果。
+Windows/macOS 安装命令已对照 Python 官方文档核对，尚未在对应系统执行。历史简化版的 96.29% / 97.71% 属于其他设置，不能替代本版实测记录。
 
-一次只改一个地方，记录变化，便于理解原因。改动网络后重新训练，再运行预测。
+![本次实际训练曲线](docs/images/curves.svg)
 
-本项目的预测演示使用 MNIST 测试图片。自行拍摄的照片还涉及背景、裁剪、居中和缩放，不能直接当成同样的数据输入。
+
+关键行为测试可以自行运行：
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+其中 best/last 测试人为给出验证损失 `0.6 → 0.2 → 0.4`，检查 best 保存第 2 轮、last 保存第 3 轮，且早停不把 last 恢复为 best。这个测试验证保存逻辑，不代表模型精度。
 
 ## 参考
 
-- [Keras 官方入门：安装与 TensorFlow 后端](https://keras.io/getting_started/)
-- [Keras 官方 MNIST CNN 示例](https://keras.io/examples/vision/mnist_convnet/)
-
-这里为了方便初学者阅读，采用更小的网络并按职责拆分文件。官方示例的准确率不代表本项目的实测结果。
+- [Python 3.11：虚拟环境](https://docs.python.org/3.11/library/venv.html)、[Windows 启动器](https://docs.python.org/3.11/using/windows.html#python-launcher-for-windows)
+- [Keras：MNIST CNN 示例](https://keras.io/examples/vision/mnist_convnet/)
+- [ModelCheckpoint](https://keras.io/api/callbacks/model_checkpoint/)、[EarlyStopping](https://keras.io/api/callbacks/early_stopping/)、[ReduceLROnPlateau](https://keras.io/api/callbacks/reduce_lr_on_plateau/)
+- [Dropout](https://keras.io/api/layers/regularization_layers/dropout/)
