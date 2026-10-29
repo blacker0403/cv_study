@@ -20,18 +20,14 @@ python -m venv .venv
 
 ```powershell
 # Windows PowerShell
-.venv\Scripts\Activate.ps1
+.venv\bin\Activate.ps1
 ```
 
 ```bat
 :: Windows 命令提示符 CMD
-.venv\Scripts\activate.bat
+.venv\bin\activate.bat
 ```
 
-```bash
-# Linux / macOS
-source .venv/bin/activate
-```
 
 安装依赖，然后训练和预测：
 
