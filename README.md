@@ -13,7 +13,7 @@
 ```bash
 git clone https://github.com/blacker0403/cv_study.git
 cd cv_study
-py -3.11 -m venv .venv
+python -3.11 -m venv .venv
 ```
 
 激活虚拟环境，按自己的系统选择一条：
